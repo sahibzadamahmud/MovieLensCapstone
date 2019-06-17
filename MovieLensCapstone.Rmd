@@ -1,0 +1,166 @@
+---
+title: "MovieLensCapstone: Predicting Movie Recommendations through Machine Learning"
+author: "Sahibzada Ali Mahmud"
+date: "June 17, 2019"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Executive Summary
+This project is based on using an appropriate machine learning algorithm to predict movie recommendations using the 10M Version of Movie lens Dataset which can be downloaded [here](https://grouplens.org/datasets/movielens/10m/). The intention behind completing this Capstone Project is to test the skills acquired throughout the Professional Certification in Data Science course, and apply them in solving a real world data science proeblem. In our case, we shall analyze the available data set and use the Random Forest approach for prediction. Random forest algorithm is a supervised classification and regression algorithm in which greater is the number of trees, greater is the accuracy of the algorithm. It offers flexibilty since it can be used for classification and prediction. The git repository for this project can be accessed [here](https://github.com/sahibzadamahmud/MovieLensCapstone).
+
+
+## 1. Methodology
+In this project, after installing the required packages and loading the libararies, the data contained in MovieLens is observed. The subset of the full MovieLens data set is used for our analysis since after repeated attempts, RStudio running on the machine used for this project could not process the large MovieLens data set. Another attempt was made on using [RStudio Cloud](https://rstudio.cloud), however, that did not work out either because of the very large processing times. Therefore, it was decided to use the subset of Movielens that was used in the Machine Learning course for the Profession Certification in Data Science. Exploratory data analysis was carried out to get insights into the data set. While using the Random Forest method for training the model and predicting the ratings, again the machine failed to execute the algorithm even in 4 hours. Therefore, the code presented in the script and this report has been validated and run in pieces. After several attempts, due to the very large processing times, the results could not be obtained. However, based on the best practices, the random forest model performance is assesed through the code given in section 9. The Root Mean Square Error(RMSE) is used in section 8 to calculate the error and hence the accuracy of the model. 
+
+
+## 2. Loading Libraries and Data
+
+```{r echo=T, results='hide'}
+#Install Required Packages if Necessary
+if(!require(tidyverse)) install.packages("tidyverse", repos = "http://cran.us.r-project.org")
+if(!require(caret)) install.packages("caret", repos = "http://cran.us.r-project.org")
+if(!require(dslabs)) install.packages("dslabs", repos = "http://cran.us.r-project.org")
+if(!require(randomForest)) install.packages("randomForest", repos = "http://cran.us.r-project.org")
+
+#Load Required Libraries
+library(dslabs)
+library(tidyverse)
+library(caret)
+library(randomForest)
+
+#Load Data
+data("movielens")
+```
+
+## 3. Oberving Data
+
+```{r}
+#Check the Structure of movielens
+str(movielens)
+
+#Check the first 10 Observations
+head(movielens, n=10)
+```
+
+## 4. Exploratory Data Analysis
+
+```{r}
+#Check the distribution of Movie Ratings
+summary(movielens$rating)
+
+#Check the Number of Rows and Columns in the Dataset                      
+paste('The movielens dataset has',nrow(movielens),'rows and',ncol(movielens),'columns.')
+
+#Check Number of Distinct User and Distinct Movies
+movielens %>% summarize(n_users = n_distinct(userId), n_movies = n_distinct(movieId))
+
+#Check Number of Movies per Year
+movies_per_year <- movielens %>% na.omit() %>% select(movieId, year) %>% group_by(year) %>% summarise(count = n())
+print(movies_per_year) 
+
+#Plot Number of Movies per Year
+movies_per_year %>% ggplot(aes(x = year, y = count)) + geom_line(color="blue")
+
+#Checking popular genre
+genres_df <- movielens %>% separate_rows(genres, sep = "\\|") %>% group_by(genres) %>% summarise(number = n())# %>% arrange(desc(number))
+
+#Plotting Popular genre
+genres_df %>% ggplot(aes(x = genres, y = number)) + geom_point() + theme(axis.text.x = element_text(angle = 90, vjust = 0.5)) 
+
+#Plotting Ratings per movie
+ratings_per_movie <- movielens %>% group_by(title) %>% summarise(number = n())
+ratings_per_movie %>% ggplot(aes(x = title, y = number)) + geom_point()
+```
+
+## 5. Separating training and validation data
+
+```{r}
+##Create a Training Data Partition
+test_index <- createDataPartition(y = movielens$rating, times = 1, p = 0.1, list = FALSE)
+edx <- movielens[-test_index,]
+temp <- movielens[test_index,]
+
+#Creating the Validation data set
+validation <- temp %>%  semi_join(edx, by = "movieId") %>% semi_join(edx, by = "userId")
+
+# Add rows removed from validation set back into edx set
+removed <- anti_join(temp, validation)
+edx <- rbind(edx, removed)
+```
+
+
+## 6. Using Random Forest Method for Predicting Outcomes
+
+```{r eval= FALSE}
+
+#Setting Seed for Reproducibility of Results
+set.seed(20)
+
+#Using the random forest method for training the model
+trained_rf1 <- randomForest(rating~userId + movieId, data = edx)
+
+#View the training results.
+print(trained_rf1) 
+
+#Make Predictions using the trained model
+predict_rf1 <- predict(trained_rf1, validation, type = "response")
+
+#View the Prediction results.
+print(predict_rf1) 
+
+```
+
+
+## 7. Caculating Accuracy of Random Forest Method through RMSE
+
+If $\hat{y_{u,i}}$ is the predicted outcome for movie $i$ by user $u$ and ${y_{u,i}}$ is the rating for movie $i$ by user $u$, while $N$ is the number of user-movie combinations, then the Root Mean Square Error (RMSE) is calculated as:
+
+$$RMSE = \sqrt{\frac{1}{N}\sum_{u,i}{(\hat{y}_{u,i}-y_{u,i})}^2}$$
+
+```{r eval= FALSE}
+#An RMSE Function
+RMSE <- function(true_ratings, predicted_ratings){
+  sqrt(mean((true_ratings - predicted_ratings)^2))
+}
+
+#Calculating the Error through RMSE
+RMSE(validation, predict_rf1)
+
+```
+
+## 8. Evaluating Model Performance
+
+```{r eval = FALSE}
+#Using repeated 10 folds cross validation
+ctrl <- trainControl(method = "repeatedcv", number = 10, repeats = 10)
+
+#Set up tuning grid for random forest
+grid_rf <- expand.grid(.mtry = c(2, 4, 8, 16))
+
+set.seed(20)
+#Using Kappa metric to select the best model
+m_rf <- train(rating~movieId + userId, data = edx, method = "rf", metric = "Kappa", trControl = ctrl, tuneGrid = grid_rf)
+
+#Set up tuning grid for C5.0 Boosted Tree
+grid_c50 <- expand.grid(.model = "tree", ,trials = c(10, 20, 30, 40), .winnow = "FALSE")
+
+set.seed(20)
+#Using the Kappa metric again
+m_c50 <- train(rating~movieId + userId, data = edx, method = "C5.0", metric = "Kappa", trControl = ctrl, tuneGrid = grid_c50)
+
+#For Comparison, the Random Forest model results are:
+m_rf
+
+#The results of boosted C5.0 model are:
+m_c50
+
+```
+
+## 9. Conclusion
+In this project, we used the random forest algorithm to predict movie ratings based on two predictors i.e. movieId and userId. The main problem that was encountered was the limited processing power of the available machine for this project. RStudio Cloud was also tried as an alternative, however, it took very large processing times also. Therefore, it was not possible to get the results of the random forest algorithm. However, the code presented in this report has been tested in pieces and it works without giving any error except the part where the random forest algorithm is applied for creating a trained model and then applying it to predict the outcomes i.e movie ratings. A git repository has been created for the project to make it convenient for others to have a look at the code and those with enough processing and memory resources can run and check it. 
+
+
